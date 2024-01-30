@@ -55,24 +55,28 @@ impl Bin {
         self.bits.count_zeros()
     }
 
-    pub fn find_first_unset_and_also_set_in(&self, other: &Self) -> usize {
-        for i in 0..other.bits.len() {
-            if !self.get(i) && other.get(i) {
-                return i;
-            }
-        }
+    // pub fn find_first_unset_and_also_set_in(&self, other: &Self) -> usize {
+    //     for i in 0..other.bits.len() {
+    //         if !self.get(i) && other.get(i) {
+    //             return i;
+    //         }
+    //     }
 
-        self.bits.len() - 1
-    }
+    //     self.bits.len() - 1
+    // }
 
-    pub fn copy_up_to_inclusive(&self, x: usize) -> Self {
-        Self {
-            bits: self.bits[0..x].to_owned(),
-        }
-    }
+    // pub fn copy_up_to_inclusive(&self, x: usize) -> Self {
+    //     Self {
+    //         bits: self.bits[0..x].to_owned(),
+    //     }
+    // }
 
     pub fn set_all_bits_from(&mut self, other: &Self) {
         self.bits |= &other.bits
+    }
+
+    pub fn bits(&self) -> &BitVec<u64, Msb0> {
+        &self.bits
     }
 }
 
@@ -137,36 +141,34 @@ pub fn def(n: usize, rules: &Rules, g: &Vec<Nimber>, largest: usize) -> usize {
     seen.lowest_unset()
 }
 
-fn can_add_to_common(common: &HashSet<Nimpos>, np: Nimpos, parity: usize) -> bool {
-    if np == 3 {
-        return false;
-    }
-    // if np == 2 {
+fn can_add_to_common(common: &Bin, np: Nimpos, parity: usize) -> bool {
+    // if np == 3 || np == 257 || np == 512 { // 0.142
     //     return false;
     // }
-
-    // if np == 17 {
-    //     return false;
-    // }
-    // if np == 8 {
+    // if np == 8 { // 0.104
     //     return false;
     // }
     let with_itself = xor(np, np, parity);
-    if with_itself == np || common.contains(&with_itself) {
+    if with_itself == np || common.get(with_itself) {
         return false;
     }
-    for &i in common.iter() {
-        if common.contains(&xor(np, i, parity))  {
+    for i in common
+        .bits()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| if *e { Some(i) } else { None })
+    {
+        if common.get(xor(np, i, parity)) {
             return false;
         }
     }
 
-    !common.contains(&parity)
+    !common.get(parity)
 }
 
 #[derive(Debug)]
 pub struct Data {
-    pub common: [HashSet<Nimpos>; 2],
+    pub common: [Bin; 2],
     pub rares: [Vec<(usize, Nimber)>; 2],
     // pub common_bitset: [Bin; 2],
     pub largest: usize,
@@ -177,9 +179,8 @@ pub struct Data {
 impl Data {
     pub fn new(largest: usize, rules: &Rules) -> Self {
         Self {
-            common: [HashSet::new(), HashSet::new()],
+            common: [Bin::make(2 * largest), Bin::make(2 * largest)],
             rares: [vec![], vec![]],
-            // common_bitset: [Bin::make(largest), Bin::make(largest)],
             largest,
             even: rules.divide.iter().any(|x| x & 1 == 0),
             odd: rules.divide.iter().any(|x| x & 1 == 1),
@@ -187,28 +188,19 @@ impl Data {
     }
 
     pub fn resize(self: &mut Self, largest: usize) {
-        // let mut rare2 = [Bin::make(largest), Bin::make(largest)];
-        // rare2[0].set_all_bits_from(&self.common_bitset[0]);
-        // rare2[1].set_all_bits_from(&self.common_bitset[1]);
-        // self.common_bitset = rare2;
+        let mut common2 = [Bin::make(2 * largest), Bin::make(2 * largest)];
+        common2[0].set_all_bits_from(&self.common[0]);
+        common2[1].set_all_bits_from(&self.common[1]);
+        self.common = common2;
         self.largest = largest;
     }
 
     pub fn add_to_common(self: &mut Self, n: usize, gn: Nimber, parity: usize) {
         let np = to_nimpos(gn, n);
 
-        if self.common[parity].contains(&np) {
+        if self.common[parity].get(np) {
             return;
         }
-        // let ignore = if self.even && self.odd {
-        //     np == 0 || np == 1
-        // } else if self.even {
-        //     np == 0
-        // } else if self.odd {
-        //     np == 1
-        // } else {
-        //     false // who cares?
-        // };
 
         let not_zero = match (self.even, self.odd) {
             (true, true) => np != 0 && np != 1,
@@ -218,7 +210,7 @@ impl Data {
         };
 
         if not_zero && can_add_to_common(&self.common[parity], np, parity) {
-            self.common[parity].insert(np);
+            self.common[parity].set_bit(np);
             // self.common_bitset[parity].set_bit(gn);
         } else {
             self.rares[parity].push((n, gn));
@@ -269,26 +261,22 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
     //     seen[1].find_first_unset_and_also_set_in(&data.common_bitset[1]),
     // ];
     //
-    let mut m= [
-        seen[0].lowest_unset(),
-        seen[1].lowest_unset(),
-    ];
+    let mut m = [seen[0].lowest_unset(), seen[1].lowest_unset()];
 
     if data.even && data.odd {
-        if data.common[0].contains(&to_nimpos(m[0], n)) && data.common[1].contains(&to_nimpos(m[1], n)){
+        if data.common[0].get(to_nimpos(m[0], n)) && data.common[1].get(to_nimpos(m[1], n)) {
             assert!(m[0] == m[1]);
             return m[0];
         }
     } else if data.even {
-        if data.common[0].contains(&to_nimpos(m[0], n)){
+        if data.common[0].get(to_nimpos(m[0], n)) {
             return m[0];
         }
     } else if data.odd {
-        if data.common[1].contains(&to_nimpos(m[1], n)){
+        if data.common[1].get(to_nimpos(m[1], n)) {
             return m[1];
         }
     }
-
 
     for i in 1..(n - rules.divide.last().unwrap()) {
         for d in rules.divide.iter() {
@@ -299,29 +287,24 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
 
             let parity = d & 1;
             seen[parity].set_bit(x);
-
         }
 
-        m = [
-            seen[0].lowest_unset(),
-            seen[1].lowest_unset(),
-        ];
+        m = [seen[0].lowest_unset(), seen[1].lowest_unset()];
 
         if data.even && data.odd {
-            if data.common[0].contains(&to_nimpos(m[0], n)) && data.common[1].contains(&to_nimpos(m[1], n)){
+            if data.common[0].get(to_nimpos(m[0], n)) && data.common[1].get(to_nimpos(m[1], n)) {
                 assert!(m[0] == m[1]);
                 return m[0];
             }
         } else if data.even {
-            if data.common[0].contains(&to_nimpos(m[0], n)){
+            if data.common[0].get(to_nimpos(m[0], n)) {
                 return m[0];
             }
         } else if data.odd {
-            if data.common[1].contains(&to_nimpos(m[1], n)){
+            if data.common[1].get(to_nimpos(m[1], n)) {
                 return m[1];
             }
         }
-
     }
     for i in n - rules.divide.last().unwrap()..n {
         for &d in rules.divide.iter() {
@@ -337,10 +320,8 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
     }
 
     if data.even && data.odd {
-        if data.common[0].contains(&to_nimpos(m[0], n)) && data.common[1].contains(&to_nimpos(m[1], n)){
-            assert!(m[0] == m[1]);
-            return m[0];
-        }
+        assert!(m[0] == m[1]);
+        return m[0];
     } else if data.even {
         return m[0];
     } else if data.odd {
