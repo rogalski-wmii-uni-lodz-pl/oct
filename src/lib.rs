@@ -1,5 +1,5 @@
 use bitvec::prelude::*;
-use std::collections::HashSet;
+// use std::collections::HashSet;
 
 use itertools::Itertools;
 
@@ -142,12 +142,15 @@ pub fn def(n: usize, rules: &Rules, g: &Vec<Nimber>, largest: usize) -> usize {
 }
 
 fn can_add_to_common(common: &Bin, np: Nimpos, parity: usize) -> bool {
-    // if np == 3 || np == 257 || np == 512 { // 0.142
+    // 0.142
+    // if np == 3 || np == 257 || np == 512 {
     //     return false;
     // }
-    // if np == 8 { // 0.104
+    // // 0.104
+    // if np == 8 {
     //     return false;
     // }
+    // // 0.166
     let with_itself = xor(np, np, parity);
     if with_itself == np || common.get(with_itself) {
         return false;
@@ -158,7 +161,8 @@ fn can_add_to_common(common: &Bin, np: Nimpos, parity: usize) -> bool {
         .enumerate()
         .filter_map(|(i, e)| if *e { Some(i) } else { None })
     {
-        if common.get(xor(np, i, parity)) {
+        let x = xor(np, i, parity);
+        if common.get(x) || x == np {
             return false;
         }
     }
@@ -203,7 +207,7 @@ impl Data {
         }
 
         let not_zero = match (self.even, self.odd) {
-            (true, true) => np != 0 && np != 1,
+            (true, true) => np != parity,
             (true, false) => np != 0,
             (false, true) => np != 1,
             (false, false) => false, // who cares?
@@ -228,54 +232,39 @@ impl Data {
 }
 
 pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
-    let mut seen = [Bin::make(data.largest), Bin::make(data.largest)];
+    let mut seen = Bin::make(data.largest);
 
     // set some
     for d in rules.some.iter() {
         let x = g[n - d];
-        seen[0].set_bit(x);
-        seen[1].set_bit(x);
+        seen.set_bit(x);
     }
 
-    if n & 1 == 0 && data.even {
-        seen[0].set_bit(0);
-    }
-    if n & 1 == 1 && data.odd {
-        seen[1].set_bit(0);
+    if (n & 1 == 0 && data.even) || (n & 1 == 1 && data.odd) {
+        seen.set_bit(0);
     }
 
     // set rare
     for &d in rules.divide.iter() {
-        let parity = d & 1;
         for &(i, r) in data.rares[d & 1].iter() {
             if n - d > i {
                 let gndi = g[n - d - i];
                 let x = r ^ gndi;
-                seen[parity].set_bit(x);
+                seen.set_bit(x);
             }
         }
     }
 
-    // let first_common = [
-    //     seen[0].find_first_unset_and_also_set_in(&data.common_bitset[0]),
-    //     seen[1].find_first_unset_and_also_set_in(&data.common_bitset[1]),
-    // ];
-    //
-    let mut m = [seen[0].lowest_unset(), seen[1].lowest_unset()];
+    let mut m = seen.lowest_unset();
 
-    if data.even && data.odd {
-        if data.common[0].get(to_nimpos(m[0], n)) && data.common[1].get(to_nimpos(m[1], n)) {
-            assert!(m[0] == m[1]);
-            return m[0];
-        }
-    } else if data.even {
-        if data.common[0].get(to_nimpos(m[0], n)) {
-            return m[0];
-        }
-    } else if data.odd {
-        if data.common[1].get(to_nimpos(m[1], n)) {
-            return m[1];
-        }
+    let mp = to_nimpos(m, n);
+
+    if data.even && data.odd && data.common[0].get(mp) && data.common[1].get(mp) {
+        return m;
+    } else if data.even && !data.odd && data.common[0].get(mp) {
+        return m;
+    } else if data.odd && !data.even && data.common[1].get(mp) {
+        return m;
     }
 
     for i in 1..(n - rules.divide.last().unwrap()) {
@@ -285,25 +274,18 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
 
             let x = gi ^ gndi;
 
-            let parity = d & 1;
-            seen[parity].set_bit(x);
+            seen.set_bit(x);
         }
 
-        m = [seen[0].lowest_unset(), seen[1].lowest_unset()];
+        m = seen.lowest_unset();
+        let mp = to_nimpos(m, n);
 
-        if data.even && data.odd {
-            if data.common[0].get(to_nimpos(m[0], n)) && data.common[1].get(to_nimpos(m[1], n)) {
-                assert!(m[0] == m[1]);
-                return m[0];
-            }
-        } else if data.even {
-            if data.common[0].get(to_nimpos(m[0], n)) {
-                return m[0];
-            }
-        } else if data.odd {
-            if data.common[1].get(to_nimpos(m[1], n)) {
-                return m[1];
-            }
+        if data.even && data.odd && data.common[0].get(mp) && data.common[1].get(mp) {
+            return m;
+        } else if data.even && !data.odd && data.common[0].get(mp) {
+            return m;
+        } else if data.odd && !data.even && data.common[1].get(mp) {
+            return m;
         }
     }
     for i in n - rules.divide.last().unwrap()..n {
@@ -314,20 +296,22 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
 
                 let x = gi ^ gndi;
 
-                seen[d & 1].set_bit(x);
+                seen.set_bit(x);
             }
         }
     }
 
-    if data.even && data.odd {
-        assert!(m[0] == m[1]);
-        return m[0];
-    } else if data.even {
-        return m[0];
-    } else if data.odd {
-        return m[1];
-    }
-    return 0;
+    seen.lowest_unset()
+
+    // if data.even && data.odd {
+    //     assert!(m[0] == m[1]);
+    //     return m[0];
+    // } else if data.even {
+    //     return m[0];
+    // } else if data.odd {
+    //     return m[1];
+    // }
+    // return seen.;
 }
 
 // pub fn rc2(
