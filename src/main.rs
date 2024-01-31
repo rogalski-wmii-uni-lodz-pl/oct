@@ -1,6 +1,6 @@
 use oct;
 
-const CHECK: bool = true;
+const CHECK: bool = false;
 
 fn main() {
     // let rules = oct::rules_from_str("0.142");
@@ -10,10 +10,10 @@ fn main() {
     // let game = "0.205";
     // let game = "0.142";
     // let game = "0.051";
-    // let game = "0.104";
+    let game = "0.104";
     // let game = "0.106";
     // let game = "0.051";
-    let game = "0.165";
+    // let game = "0.165";
     let rules = oct::rules_from_str(game); // breaks down for (2, 1) and (45, 8)
 
     // let mut g = vec![0; 1_000_000];

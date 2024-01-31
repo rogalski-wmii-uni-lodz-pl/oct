@@ -1,5 +1,6 @@
+use std::collections::HashSet;
+
 use bitvec::prelude::*;
-// use std::collections::HashSet;
 
 use itertools::Itertools;
 
@@ -55,28 +56,8 @@ impl Bin {
         self.bits.count_zeros()
     }
 
-    // pub fn find_first_unset_and_also_set_in(&self, other: &Self) -> usize {
-    //     for i in 0..other.bits.len() {
-    //         if !self.get(i) && other.get(i) {
-    //             return i;
-    //         }
-    //     }
-
-    //     self.bits.len() - 1
-    // }
-
-    // pub fn copy_up_to_inclusive(&self, x: usize) -> Self {
-    //     Self {
-    //         bits: self.bits[0..x].to_owned(),
-    //     }
-    // }
-
     pub fn set_all_bits_from(&mut self, other: &Self) {
         self.bits |= &other.bits
-    }
-
-    pub fn bits(&self) -> &BitVec<u64, Msb0> {
-        &self.bits
     }
 }
 
@@ -141,40 +122,34 @@ pub fn def(n: usize, rules: &Rules, g: &Vec<Nimber>, largest: usize) -> usize {
     seen.lowest_unset()
 }
 
-fn can_add_to_common(common: &Bin, np: Nimpos, parity: usize) -> bool {
+fn can_add_to_common(common: &HashSet<usize>, np: Nimpos, parity: usize) -> bool {
     // 0.142
     // if np == 3 || np == 257 || np == 512 {
     //     return false;
     // }
-    // // 0.104
-    // if np == 8 {
-    //     return false;
-    // }
-    // // 0.166
-    let with_itself = xor(np, np, parity);
-    if with_itself == np || common.get(with_itself) {
+    // 0.104
+    if np == 8 {
         return false;
     }
-    for i in common
-        .bits()
-        .iter()
-        .enumerate()
-        .filter_map(|(i, e)| if *e { Some(i) } else { None })
-    {
+    let with_itself = xor(np, np, parity);
+    if with_itself == np || common.contains(&with_itself) {
+        return false;
+    }
+    for &i in common {
         let x = xor(np, i, parity);
-        if common.get(x) || x == np {
+        if common.contains(&x) {
             return false;
         }
     }
 
-    !common.get(parity)
+    !common.contains(&parity)
 }
 
 #[derive(Debug)]
 pub struct Data {
-    pub common: [Bin; 2],
+    pub common: [HashSet<usize>; 2],
+    pub both_common: Bin,
     pub rares: [Vec<(usize, Nimber)>; 2],
-    // pub common_bitset: [Bin; 2],
     pub largest: usize,
     pub even: bool,
     pub odd: bool,
@@ -183,7 +158,8 @@ pub struct Data {
 impl Data {
     pub fn new(largest: usize, rules: &Rules) -> Self {
         Self {
-            common: [Bin::make(2 * largest), Bin::make(2 * largest)],
+            both_common: Bin::make(2 * largest),
+            common: [HashSet::new(), HashSet::new()],
             rares: [vec![], vec![]],
             largest,
             even: rules.divide.iter().any(|x| x & 1 == 0),
@@ -192,18 +168,16 @@ impl Data {
     }
 
     pub fn resize(self: &mut Self, largest: usize) {
-        let mut common2 = [Bin::make(2 * largest), Bin::make(2 * largest)];
-        common2[0].set_all_bits_from(&self.common[0]);
-        common2[1].set_all_bits_from(&self.common[1]);
-        self.common = common2;
+        let mut common2 = Bin::make(2 * largest);
+        common2.set_all_bits_from(&self.both_common);
+        self.both_common = common2;
         self.largest = largest;
     }
 
-    pub fn add_to_common(self: &mut Self, n: usize, gn: Nimber, parity: usize) {
+    pub fn add_to_common(self: &mut Self, n: usize, gn: Nimber, parity: usize) -> bool {
         let np = to_nimpos(gn, n);
-
-        if self.common[parity].get(np) {
-            return;
+        if self.common[parity].contains(&np) {
+            return true;
         }
 
         let not_zero = match (self.even, self.odd) {
@@ -214,19 +188,30 @@ impl Data {
         };
 
         if not_zero && can_add_to_common(&self.common[parity], np, parity) {
-            self.common[parity].set_bit(np);
-            // self.common_bitset[parity].set_bit(gn);
+            self.common[parity].insert(np);
+            // self.both_common.set_bit(np);
+            true
         } else {
             self.rares[parity].push((n, gn));
+            false
         }
     }
 
     pub fn add_to_common2(self: &mut Self, n: usize, gn: Nimber) {
-        if self.even {
-            self.add_to_common(n, gn, 0);
-        }
-        if self.odd {
-            self.add_to_common(n, gn, 1);
+        let ec = if self.even {
+            self.add_to_common(n, gn, 0)
+        } else {
+            true
+        };
+        let oc = if self.odd {
+            self.add_to_common(n, gn, 1)
+        } else {
+            true
+        };
+
+        if ec && oc {
+            let np = to_nimpos(gn, n);
+            self.both_common.set_bit(np);
         }
     }
 }
@@ -259,11 +244,7 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
 
     let mp = to_nimpos(m, n);
 
-    if data.even && data.odd && data.common[0].get(mp) && data.common[1].get(mp) {
-        return m;
-    } else if data.even && !data.odd && data.common[0].get(mp) {
-        return m;
-    } else if data.odd && !data.even && data.common[1].get(mp) {
+    if data.both_common.get(mp) {
         return m;
     }
 
@@ -278,13 +259,9 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
         }
 
         m = seen.lowest_unset();
-        let mp = to_nimpos(m, n);
 
-        if data.even && data.odd && data.common[0].get(mp) && data.common[1].get(mp) {
-            return m;
-        } else if data.even && !data.odd && data.common[0].get(mp) {
-            return m;
-        } else if data.odd && !data.even && data.common[1].get(mp) {
+        let mp = to_nimpos(m, n);
+        if data.both_common.get(mp) {
             return m;
         }
     }
@@ -345,7 +322,7 @@ pub fn rc(n: usize, rules: &Rules, g: &Vec<Nimber>, data: &Data) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
 
     #[test]
     fn it_works() {
